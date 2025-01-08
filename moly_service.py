@@ -1,66 +1,132 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import xml.etree.ElementTree as ET
+import http.client
+import json
+
+
+SOAP_SERVER = "biocov.smartime.cl"
+SOAP_PATH = "/Reports/WSMolymet.asmx"
+PORT = 8000
+TOKEN = "$Uyhha!rEpL"  
+
+
+def send_soap_request(desde, hasta, token):
+    
+    soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
+    <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+                   xmlns:xsd="http://www.w3.org/2001/XMLSchema" 
+                   xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+        <soap:Body>
+            <ObtieneMarcasContratistas xmlns="http://tempuri.org/">
+                <token>{token}</token>
+                <Desde>{desde}</Desde>
+                <Hasta>{hasta}</Hasta>
+            </ObtieneMarcasContratistas>
+        </soap:Body>
+    </soap:Envelope>"""
+
+    headers = {
+        "Content-Type": "text/xml; charset=utf-8",
+        "SOAPAction": "http://tempuri.org/ObtieneMarcasContratistas"
+    }
+
+    try:
+        
+        conn = http.client.HTTPSConnection(SOAP_SERVER)
+        conn.request("POST", SOAP_PATH, soap_body, headers)
+        response = conn.getresponse()
+
+        
+        if response.status != 200:
+            raise ConnectionError(f"Error del servidor: {response.status} {response.reason}")
+
+        
+        response_data = response.read().decode("utf-8")
+        conn.close()
+        return response_data
+
+    except Exception as e:
+        raise ConnectionError(f"Fallo en la conexión al servidor SOAP: {str(e)}")
+
+
+def parse_soap_to_json(soap_response):
+    try:
+        
+        tree = ET.fromstring(soap_response)
+        namespace = {'soap': 'http://schemas.xmlsoap.org/soap/envelope/'}
+        body = tree.find('soap:Body', namespace)
+
+        
+        response_node = body.find('.//ObtieneMarcasContratistasResponse', namespace)
+        if response_node is None:
+            raise ValueError("No se encontraron datos en la respuesta SOAP")
+
+    
+        result_data = {}
+        for child in response_node:
+            result_data[child.tag] = child.text
+
+        return result_data
+
+    except Exception as e:
+        return {"error": f"Fallo al parsear la respuesta SOAP: {str(e)}"}
+
 
 class SOAPHandler(BaseHTTPRequestHandler):
     def do_POST(self):
-        # Leer el contenido de la solicitud
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
+        try:
+            
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
 
-        # Procesar la solicitud SOAP entrante
-        soap_action = self.headers.get('SOAPAction', '')
-        if "ObtieneMarcasContratistas" in soap_action:
-            response_data = self.handle_obtiene_marcas_contratistas(post_data)
+            
+            desde, hasta, token = self.extract_parameters(post_data)
+            if not desde or not hasta or not token:
+                raise ValueError("Parámetros 'Desde', 'Hasta' y 'token' son requeridos")
+
+            
+            if token != TOKEN:
+                raise PermissionError("Token inválido o no autorizado")
+
+          
+            soap_response = send_soap_request(desde, hasta, token)
+
+            
+            json_response = parse_soap_to_json(soap_response)
+
+       
             self.send_response(200)
-            self.send_header('Content-Type', 'text/xml; charset=utf-8')
+            self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(response_data.encode('utf-8'))
-        else:
-            self.send_error(400, "Invalid SOAPAction")
+            self.wfile.write(json.dumps(json_response).encode("utf-8"))
 
-    def handle_obtiene_marcas_contratistas(self, request_data):
-        # Extraer los datos de la solicitud SOAP
-        tree = ET.fromstring(request_data.decode('utf-8'))
-        namespace = {'soap': 'http://schemas.xmlsoap.org/soap/envelope/'}
-        body = tree.find('soap:Body', namespace)
+        except PermissionError as pe:
+            self.send_error(403, f"Acceso denegado: {str(pe)}")
+        except Exception as e:
+            
+            self.send_error(500, f"Error interno: {str(e)}")
+
+    def extract_parameters(self, post_data):
+        try:
         
-        token = body.find('.//token').text
-        desde = body.find('.//Desde').text
-        hasta = body.find('.//Hasta').text
+            tree = ET.fromstring(post_data.decode("utf-8"))
+            namespace = {'soap': 'http://schemas.xmlsoap.org/soap/envelope/'}
+            body = tree.find('soap:Body', namespace)
 
-        # Generar la respuesta SOAP
-        response_data = self.generate_soap_response(token, desde, hasta)
-        return response_data
+            token = body.find('.//token').text
+            desde = body.find('.//Desde').text
+            hasta = body.find('.//Hasta').text
+            return desde, hasta, token
 
-    def generate_soap_response(self, token, desde, hasta):
-        # Construir una respuesta SOAP de ejemplo
-        response_body = f"""
-        <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                       xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-                       xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-            <soap:Body>
-                <ObtieneMarcasContratistasResponse xmlns="http://tempuri.org/">
-                    <Marcas>
-                        <Marca>
-                            <Token>{token}</Token>
-                            <Desde>{desde}</Desde>
-                            <Hasta>{hasta}</Hasta>
-                            <Resultado>Ejemplo de marca registrada</Resultado>
-                        </Marca>
-                    </Marcas>
-                </ObtieneMarcasContratistasResponse>
-            </soap:Body>
-        </soap:Envelope>
-        """
-        return response_body
+        except Exception as e:
+            raise ValueError(f"Error al extraer parámetros: {str(e)}")
 
-# Configurar y ejecutar el servidor HTTP
+
 def run_server():
-    server_address = ('', 8000)  # Escucha en el puerto 8000
+    server_address = ("", PORT)
     httpd = HTTPServer(server_address, SOAPHandler)
-    print("Servidor SOAP ejecutándose en el puerto 8000...")
+    print(f"Servidor ejecutándose en el puerto {PORT}...")
     httpd.serve_forever()
 
 if __name__ == "__main__":
     run_server()
-
