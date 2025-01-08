@@ -5,13 +5,13 @@ import json
 import re
 from datetime import datetime
 
-# Configuración global
+
 SOAP_SERVER = "biocov.smartime.cl"
 SOAP_PATH = "/Reports/WSMolymet.asmx"
 PORT = 8000
 TOKEN = "$Uyhha!rEpL"
 
-# Validar formato de fechas
+
 def validate_datetime_format(date_text):
     try:
         datetime.strptime(date_text, '%Y-%m-%d %H:%M')
@@ -19,12 +19,12 @@ def validate_datetime_format(date_text):
     except ValueError:
         return False
 
-# Validar formato de token (opcional: puedes ajustar esta función si hay un formato específico)
+
 def validate_token_format(token):
-    # Ejemplo: token debe ser alfanumérico y de longitud exacta de 12 caracteres
+    
     return re.match(r'^[a-zA-Z0-9!@#$%^&*()_+=-]{12}$', token) is not None
 
-# Función para enviar solicitudes SOAP al servidor externo
+
 def send_soap_request(desde, hasta, token):
     soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
     <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
@@ -59,7 +59,7 @@ def send_soap_request(desde, hasta, token):
     except Exception as e:
         raise ConnectionError(f"Fallo en la conexión al servidor SOAP: {str(e)}")
 
-# Función para convertir la respuesta SOAP a JSON
+
 def parse_soap_to_json(soap_response):
     try:
         tree = ET.fromstring(soap_response)
@@ -79,7 +79,7 @@ def parse_soap_to_json(soap_response):
     except Exception as e:
         return {"error": f"Fallo al parsear la respuesta SOAP: {str(e)}"}
 
-# Clase para manejar las solicitudes HTTP
+
 class SOAPHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
@@ -88,7 +88,7 @@ class SOAPHandler(BaseHTTPRequestHandler):
 
             desde, hasta, token = self.extract_parameters(post_data)
 
-            # Validar parámetros
+            
             if not desde or not hasta or not token:
                 raise ValueError("Parámetros 'Desde', 'Hasta' y 'token' son requeridos")
             if not validate_datetime_format(desde) or not validate_datetime_format(hasta):
@@ -125,7 +125,6 @@ class SOAPHandler(BaseHTTPRequestHandler):
         except Exception as e:
             raise ValueError(f"Error al extraer parámetros: {str(e)}")
 
-# Función para ejecutar el servidor HTTP
 def run_server():
     server_address = ("", PORT)
     httpd = HTTPServer(server_address, SOAPHandler)
